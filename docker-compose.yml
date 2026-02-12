@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  training:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - WANDB_API_KEY=${WANDB_API_KEY}
+      - WANDB_PROJECT=${WANDB_PROJECT:-mindsync-model}
+      - WANDB_ENTITY=${WANDB_ENTITY}
+      - MODEL_VERSION=${MODEL_VERSION:-v1.0}
+    volumes:
+      - ./artifacts:/app/artifacts
+    command: python train.py
+
+volumes:
+  artifacts:

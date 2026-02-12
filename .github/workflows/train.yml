@@ -1,0 +1,91 @@
+name: Train Model
+
+on:
+  push:
+    branches:
+      - main
+  schedule:
+    # Run weekly on Sunday at 00:00 UTC
+    - cron: '0 0 * * 0'
+  workflow_dispatch:
+    inputs:
+      model_version:
+        description: 'Model version tag (leave empty for auto-generated)'
+        required: false
+        default: ''
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Generate dynamic version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.model_version }}" ]; then
+            VERSION="${{ github.event.inputs.model_version }}"
+          else
+            SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+            VERSION="v2.0.${{ github.run_number }}-${SHORT_SHA}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Generated version: $VERSION"
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+      
+      - name: Run training
+        env:
+          WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
+          WANDB_PROJECT: mindsync-model
+          WANDB_ENTITY: ${{ secrets.WANDB_ENTITY }}
+          MODEL_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          python train.py
+      
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: model-artifacts-${{ steps.version.outputs.version }}
+          path: artifacts/
+          retention-days: 30
+      
+      - name: Notify success
+        if: success()
+        run: |
+          echo "✅ Training completed and artifacts uploaded to W&B"
+          echo "Model version: ${{ steps.version.outputs.version }}"
+          echo "📦 Artifacts available at: https://wandb.ai/${{ secrets.WANDB_ENTITY }}/mindsync-model/artifacts"
+      
+      - name: Notify failure
+        if: failure()
+        run: echo "❌ Training failed"
+
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+      
+      - name: Run tests
+        run: |
+          python test_training.py
