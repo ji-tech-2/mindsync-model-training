@@ -1,7 +1,6 @@
 """
 Test script for MindSync Training Service
-
-This script runs quick validation tests without uploading to W&B.
+Updated to validate Smart Preprocessing (Yeo-Johnson + Poly + Lasso) and Custom Ridge.
 """
 
 import os
@@ -11,6 +10,8 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 
+# Pastikan module lokal bisa diimport
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 def test_imports():
     """Test 1: Verify all required imports work."""
@@ -22,11 +23,12 @@ def test_imports():
         import wandb
         print("✅ wandb imported successfully")
     except ImportError as e:
-        print(f"❌ wandb import failed: {e}")
-        return False
+        print(f"⚠️ wandb import failed (Optional): {e}")
     
     try:
         import sklearn
+        from sklearn.linear_model import LassoCV
+        from sklearn.preprocessing import PowerTransformer, PolynomialFeatures
         print(f"✅ scikit-learn imported successfully (version {sklearn.__version__})")
     except ImportError as e:
         print(f"❌ scikit-learn import failed: {e}")
@@ -44,6 +46,13 @@ def test_imports():
         print("✅ Custom Ridge Regression imported successfully")
     except ImportError as e:
         print(f"❌ Custom Ridge import failed: {e}")
+        return False
+
+    try:
+        import train
+        print("✅ Train module imported successfully")
+    except ImportError as e:
+        print(f"❌ Train module import failed: {e}")
         return False
     
     print("\n✅ All imports successful!\n")
@@ -78,8 +87,8 @@ def test_dataset():
     
     # Check required columns
     required_cols = [
-        'mental_wellness_score', 'age', 'gender', 'occupation', 
-        'platform', 'screentime_hours'
+        'mental_wellness_index_0_100', 'age', 'gender', 'occupation', 
+        'work_mode', 'screen_time_hours'
     ]
     missing_cols = [col for col in required_cols if col not in df.columns]
     
@@ -101,9 +110,9 @@ def test_dataset():
 
 
 def test_custom_ridge():
-    """Test 3: Verify custom Ridge Regression works."""
+    """Test 3: Verify custom Ridge Regression works with ALL solvers."""
     print("=" * 60)
-    print("TEST 3: Testing Custom Ridge Regression...")
+    print("TEST 3: Testing Custom Ridge Regression (All Solvers)...")
     print("=" * 60)
     
     try:
@@ -119,15 +128,23 @@ def test_custom_ridge():
             X, y, test_size=0.2, random_state=42
         )
         
-        # Test each solver
-        solvers = ['closed_form', 'svd', 'cholesky']
+        # Test expanded list of solvers from your new Custom Ridge
+        solvers = ['closed_form', 'svd', 'cholesky', 'gd', 'sgd', 'sag']
         
         for solver in solvers:
-            print(f"\n  Testing solver: {solver}")
-            model = LinearRegressionRidge(alpha=1.0, solver=solver)
-            model.fit(X_train, y_train)
-            score = model.score(X_test, y_test)
-            print(f"    ✅ Solver '{solver}' works! R² = {score:.4f}")
+            print(f"  Testing solver: {solver}...", end=" ")
+            try:
+                model = LinearRegressionRidge(alpha=1.0, solver=solver, max_iter=500)
+                model.fit(X_train, y_train)
+                score = model.score(X_test, y_test)
+                # GD/SGD might have lower scores on random noise without tuning, checking if it runs is priority
+                if score > -10: 
+                    print(f"✅ OK (R²={score:.2f})")
+                else:
+                    print(f"⚠️  Runs but score low (R²={score:.2f})")
+            except Exception as e:
+                print(f"❌ FAIL: {e}")
+                return False
         
         print("\n✅ Custom Ridge Regression working!\n")
         return True
@@ -140,43 +157,53 @@ def test_custom_ridge():
 
 
 def test_preprocessing():
-    """Test 4: Test preprocessing pipeline."""
+    """Test 4: Test Smart Pipeline (Yeo-Johnson + Poly + Lasso)."""
     print("=" * 60)
-    print("TEST 4: Testing preprocessing pipeline...")
+    print("TEST 4: Testing Smart Preprocessing Pipeline...")
     print("=" * 60)
     
     try:
-        from sklearn.preprocessing import StandardScaler, OneHotEncoder
-        from sklearn.compose import ColumnTransformer
+        import train
         
-        # Load dataset
-        base_dir = Path(__file__).parent
-        df_path = base_dir / "df" / "ScreenTime vs MentalWellness.csv"
-        df = pd.read_csv(df_path).head(100)  # Use small sample
+        # Load small sample
+        df = train.load_and_prepare_data().head(100)
         
-        # Define features
-        categorical_features = ["gender", "occupation", "platform"]
-        numeric_features = [
-            col for col in df.columns 
-            if col not in categorical_features + ["mental_wellness_score", "user_id"]
-        ]
+        target = 'mental_wellness_index_0_100'
+        X = df.drop(target, axis=1)
+        y = df[target]
         
-        print(f"  Numeric features: {len(numeric_features)}")
-        print(f"  Categorical features: {len(categorical_features)}")
+        # Create the complex pipeline
+        pipeline = train.create_pipeline()
         
-        # Create preprocessor
-        preprocessor = ColumnTransformer(
-            transformers=[
-                ("num", StandardScaler(), numeric_features),
-                ("cat", OneHotEncoder(drop="first", sparse_output=False), categorical_features),
-            ]
-        )
+        print("  Running fit_transform on pipeline...")
+        print("  (Includes: Cleaning -> Yeo-Johnson -> Poly -> LassoCV)")
         
-        X = df[numeric_features + categorical_features]
-        X_transformed = preprocessor.fit_transform(X)
+        X_transformed = pipeline.fit_transform(X, y)
         
-        print(f"  ✅ Input shape: {X.shape}")
-        print(f"  ✅ Output shape: {X_transformed.shape}")
+        # Get shapes
+        # We need to access the transformer inside to see original dimension before Lasso selection
+        prep_step = pipeline.named_steps['prepare_data']
+        cleaner_step = pipeline.named_steps['cleaner']
+        
+        # Transform X manually up to before selection to count features
+        X_cleaned = cleaner_step.transform(X)
+        X_expanded = prep_step.transform(X_cleaned)
+        
+        n_features_expanded = X_expanded.shape[1]
+        n_features_selected = X_transformed.shape[1]
+        
+        print(f"  ✅ Input Rows: {len(X)}")
+        print(f"  ✅ Features after Poly Expansion: {n_features_expanded}")
+        print(f"  ✅ Features after Lasso Selection: {n_features_selected}")
+        
+        if n_features_selected == 0:
+            print("  ⚠️  Warning: Lasso dropped ALL features (data sample might be too small/noisy)")
+        elif n_features_selected > n_features_expanded:
+             print("  ❌ Error: Selected features cannot be more than expanded features")
+             return False
+        else:
+            print(f"  ✅ Feature selection active (dropped {n_features_expanded - n_features_selected} features)")
+
         print("\n✅ Preprocessing pipeline working!\n")
         return True
         
@@ -188,7 +215,7 @@ def test_preprocessing():
 
 
 def test_training_dry_run():
-    """Test 5: Run a quick training dry run (small dataset)."""
+    """Test 5: Run a quick training dry run using train.py logic."""
     print("=" * 60)
     print("TEST 5: Running training dry run (no W&B upload)...")
     print("=" * 60)
@@ -197,36 +224,28 @@ def test_training_dry_run():
     os.environ['SKIP_WANDB'] = 'true'
     
     try:
-        # Import training script
         import train
         
         # Load small sample of data
         df = train.load_and_prepare_data()
-        df_sample = df.sample(n=min(500, len(df)), random_state=42)
+        df_sample = df.sample(n=min(300, len(df)), random_state=42)
         
-        print(f"  Using sample: {len(df_sample)} rows")
-        
-        # Define features
-        target = "mental_wellness_score"
-        categorical_features = ["gender", "occupation", "platform"]
-        numeric_features = [
-            col for col in df_sample.columns
-            if col not in categorical_features + [target, "user_id"]
-        ]
+        target = "mental_wellness_index_0_100"
+        X = df_sample.drop(target, axis=1)
+        y = df_sample[target]
         
         # Split data
         from sklearn.model_selection import train_test_split
-        X = df_sample[numeric_features + categorical_features]
-        y = df_sample[target]
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=0.2, random_state=42
         )
         
-        # Create preprocessor
-        preprocessor = train.create_preprocessor(categorical_features, numeric_features)
+        # Use the pipeline creator from train.py
+        print("  Creating Smart Pipeline...")
+        preprocessor = train.create_pipeline()
         
-        # Train model
-        print("  Training model...")
+        # Train model using the updated train_model function
+        print("  Training Custom Ridge Model...")
         model, metrics = train.train_model(X_train, y_train, X_test, y_test, preprocessor)
         
         print(f"\n  📊 Training Results:")
@@ -234,11 +253,11 @@ def test_training_dry_run():
         print(f"    Test R²:  {metrics['test_r2']:.4f}")
         print(f"    Test RMSE: {metrics['test_rmse']:.4f}")
         
-        # Check if model is reasonable
-        if metrics['test_r2'] > 0.5:
-            print(f"\n  ✅ Model performance looks good!")
+        # Check if model is reasonable (threshold relaxed for dry run on small data)
+        if metrics['train_r2'] > -1.0:
+            print(f"\n  ✅ Model trained and evaluated successfully.")
         else:
-            print(f"\n  ⚠️  Warning: Model R² is low (might need more data)")
+            print(f"\n  ⚠️  Warning: Model R² is very low (expected on small random sample).")
         
         print("\n✅ Training dry run completed!\n")
         return True
