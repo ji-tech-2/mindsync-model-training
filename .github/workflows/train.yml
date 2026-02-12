@@ -49,6 +49,7 @@ jobs:
         run: |
           echo "✅ Training completed and artifacts uploaded to W&B"
           echo "Model version: ${{ github.event.inputs.model_version || 'v1.0' }}"
+          echo "📦 Artifacts available at: https://wandb.ai/${{ secrets.WANDB_ENTITY }}/mindsync-model/artifacts"
       
       - name: Notify failure
         if: failure()

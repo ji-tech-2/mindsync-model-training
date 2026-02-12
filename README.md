@@ -24,7 +24,35 @@ Upload to W&B
 Inference Service downloads independently
 ```
 
-## 📋 Prerequisites
+## � CI/CD Workflow
+
+### Automatic Training on Push to Main
+
+```
+Developer creates PR → Tests run → Merge to main
+    ↓
+GitHub Actions: train.yml auto-triggers
+    ↓
+Train model & upload to W&B ✅
+```
+
+**Triggers**:
+- `push` to `main` branch (if .py or requirements.txt changed)
+- `schedule` - Weekly on Sunday
+- `workflow_dispatch` - Manual trigger
+
+### Standard Development Flow
+
+```bash
+# 1. Create feature branch
+git checkout -b feature/improve-model
+
+# 2. Make changes to train.py, custom_ridge.py, etc.
+# 3. Create PR and get review
+# 4. Merge to main → Training auto-runs! ✅
+```
+
+## �📋 Prerequisites
 
 - Python 3.11+
 - Weights & Biases account ([daftar di sini](https://wandb.ai/))
@@ -85,13 +113,18 @@ docker run -e WANDB_API_KEY=your-api-key \
 
 ## 📦 Artifacts yang Dihasilkan
 
-Training akan menghasilkan artifacts berikut dan upload ke W&B:
+Training akan menghasilkan artifacts berikut:
 
-1. **model.pkl** - Trained Ridge Regression model
-2. **preprocessor.pkl** - Data preprocessing pipeline
-3. **healthy_cluster_avg.csv** - Nilai rata-rata cluster healthy users
-4. **model_coefficients.csv** - Koefisien model untuk interpretability
-5. **feature_importance.csv** - Top 20 fitur paling penting
+### Uploaded to W&B:
+1. **model.pkl** - Trained Ridge Regression model ⬆️
+2. **preprocessor.pkl** - Data preprocessing pipeline ⬆️
+3. **model_coefficients.csv** - Koefisien model untuk interpretability ⬆️
+4. **feature_importance.csv** - Top 20 fitur paling penting ⬆️
+
+### Generated Locally (NOT uploaded):
+5. **healthy_cluster_avg.csv** - Nilai rata-rata cluster healthy users 📌
+   - **Not uploaded to W&B** (inference service maintains its own version)
+   - Used for local validation only
 
 ## 🔄 CI/CD Integration
 

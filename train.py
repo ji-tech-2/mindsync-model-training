@@ -222,8 +222,23 @@ def upload_to_wandb(metrics, model_config):
         },
     )
     
-    # Add all files from artifacts directory
-    artifact.add_dir(ARTIFACTS_DIR)
+    # Add files individually (exclude healthy_cluster_avg.csv - maintained locally in inference)
+    files_to_upload = [
+        "model.pkl",
+        "preprocessor.pkl",
+        "model_coefficients.csv",
+        "feature_importance.csv",
+    ]
+    
+    for filename in files_to_upload:
+        filepath = os.path.join(ARTIFACTS_DIR, filename)
+        if os.path.exists(filepath):
+            artifact.add_file(filepath, name=filename)
+            print(f"  📦 Added {filename} to artifact")
+        else:
+            print(f"  ⚠️  {filename} not found, skipping")
+    
+    print(f"  ℹ️  Skipped: healthy_cluster_avg.csv (maintained locally in inference service)")
     
     # Log artifact
     run.log_artifact(artifact)
