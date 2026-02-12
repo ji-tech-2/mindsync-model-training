@@ -1,6 +1,8 @@
 # MindSync Model Training Service
 
-Service untuk training model machine learning MindSync dengan integrasi Weights & Biases (W&B).
+**Independent microservice** untuk training model machine learning MindSync dengan integrasi Weights & Biases (W&B).
+
+> **Note**: Service ini adalah microservice yang terpisah dan independen dari inference service. Deployment dan workflow-nya tidak terhubung langsung dengan service lain.
 
 ## 🎯 Tujuan
 
@@ -9,6 +11,18 @@ Service ini bertanggung jawab untuk:
 - Melakukan clustering untuk identifikasi pola healthy user
 - Upload model artifacts ke Weights & Biases
 - Versioning model untuk deployment ke inference service
+
+## 🏗️ Architecture
+
+```
+Training Service (Standalone)
+    ↓
+Train Model
+    ↓
+Upload to W&B
+    ↓
+Inference Service downloads independently
+```
 
 ## 📋 Prerequisites
 
@@ -81,29 +95,28 @@ Training akan menghasilkan artifacts berikut dan upload ke W&B:
 
 ## 🔄 CI/CD Integration
 
-### GitHub Actions Example
+Service ini memiliki GitHub Actions workflow sendiri di `.github/workflows/`:
 
-```yaml
-name: Train Model
+- **train.yml** - Training pipeline (manual atau scheduled)
+- **test.yml** - Automated testing untuk PR dan commits
 
-on:
-  schedule:
-    - cron: '0 0 * * 0'  # Weekly training
-  workflow_dispatch:
+### Setup GitHub Actions
 
-jobs:
-  train:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      
-      - name: Build and run training
-        run: |
-          cd mindsync-model-training
-          docker build -t mindsync-training .
-          docker run -e WANDB_API_KEY=${{ secrets.WANDB_API_KEY }} \
-                     -e WANDB_PROJECT=mindsync-model \
-                     mindsync-training
+1. Add secrets di repository settings:
+   - `WANDB_API_KEY` - Your W&B API key
+   - `WANDB_ENTITY` - Your W&B username/team
+
+2. Workflow akan otomatis run:
+   - Manual trigger: Actions → Train Model → Run workflow
+   - Scheduled: Setiap Sunday jam 00:00 UTC
+   - PR/commits: Automatic tests
+
+### Manual Trigger
+
+```bash
+# Via GitHub UI: Actions → Train Model → Run workflow
+# Atau via gh CLI:
+gh workflow run train.yml -f model_version=v1.1.0
 ```
 
 ## 📊 Model Performance
