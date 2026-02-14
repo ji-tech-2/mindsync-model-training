@@ -139,7 +139,7 @@ def train_model(X_train, y_train, X_test, y_test, preprocessor):
     # Full pipeline with model
     model_pipeline = Pipeline([
         ("preprocessor", preprocessor),
-        ("regressor", LinearRegressionRidge(alpha=1.0, solver="closed_form")),
+        ("model", LinearRegressionRidge(alpha=1.0, solver="closed_form")),
     ])
     
     # Train
@@ -174,7 +174,8 @@ def extract_feature_importance(model_pipeline):
     try:
         # 1. Dig into the pipeline steps
         preprocessor_pipe = model_pipeline.named_steps['preprocessor']
-        regressor = model_pipeline.named_steps['regressor']
+        # Support both step names: 'model' (notebook convention) and 'regressor' (legacy)
+        regressor = model_pipeline.named_steps.get('model') or model_pipeline.named_steps.get('regressor')
         
         # Steps inside preprocessor
         prepare_step = preprocessor_pipe.named_steps['prepare_data']
@@ -189,7 +190,7 @@ def extract_feature_importance(model_pipeline):
         # 4. Filter names
         final_feature_names = all_feature_names[selected_mask]
         
-        # 5. Get Coefficients from Ridge
+        # 5. Get Coefficients from Ridge (try 'model' step first, fallback to 'regressor')
         coefficients = regressor.coef_
         
         # Validate shapes
@@ -198,12 +199,14 @@ def extract_feature_importance(model_pipeline):
             return pd.DataFrame() # Return empty if mismatch
             
         # 6. Create DataFrame
+        # Use uppercase column names to match Flask's analyze_wellness_factors()
+        # which reads row["Feature"] and row["Coefficient"]
         coef_df = pd.DataFrame({
-            "feature": final_feature_names, 
-            "coefficient": coefficients, 
-            "abs_coefficient": np.abs(coefficients)
+            "Feature": final_feature_names, 
+            "Coefficient": coefficients, 
+            "Abs_Coefficient": np.abs(coefficients)
         })
-        coef_df = coef_df.sort_values("abs_coefficient", ascending=False)
+        coef_df = coef_df.sort_values("Abs_Coefficient", ascending=False)
         
         print(f"✅ Extracted {len(coef_df)} selected features (from original {len(all_feature_names)})")
         return coef_df
@@ -232,8 +235,11 @@ def save_artifacts_locally(model_pipeline, coef_df):
     with open(os.path.join(ARTIFACTS_DIR, "preprocessor.pkl"), "wb") as f:
         pickle.dump(model_pipeline.named_steps['preprocessor'], f)
     
-    # Save coefficients
+    # Save coefficients as both files:
+    # - model_coefficients.csv: Used by Flask's analyze_wellness_factors()
+    # - feature_importance.csv: Used by W&B and general analysis
     if not coef_df.empty:
+        coef_df.to_csv(os.path.join(ARTIFACTS_DIR, "model_coefficients.csv"), index=False)
         coef_df.to_csv(os.path.join(ARTIFACTS_DIR, "feature_importance.csv"), index=False)
     
     print("✅ Artifacts saved locally")
@@ -271,7 +277,7 @@ def upload_to_wandb(metrics, model_config, coef_df):
     )
     
     # Add files
-    files = ["model.pkl", "preprocessor.pkl", "feature_importance.csv"]
+    files = ["model.pkl", "preprocessor.pkl", "feature_importance.csv", "model_coefficients.csv"]
     for filename in files:
         filepath = os.path.join(ARTIFACTS_DIR, filename)
         if os.path.exists(filepath):
