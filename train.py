@@ -17,6 +17,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.feature_selection import SelectFromModel
 from sklearn.linear_model import LassoCV
 from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+from sklearn.inspection import permutation_importance
 
 # Import custom ridge regression
 # Pastikan file custom_ridge.py ada di folder yang sama
@@ -165,11 +166,12 @@ def train_model(X_train, y_train, X_test, y_test, preprocessor):
     return model_pipeline, metrics
 
 
-def extract_feature_importance(model_pipeline):
+def extract_feature_importance(model_pipeline, X_test, y_test):
     """
-    Extract feature importance handling Polynomial expansion and Lasso selection.
+    Extract feature coefficients and permutation importance.
+    Returns: (coef_df, importance_df)
     """
-    print("📊 Extracting advanced feature importance...")
+    print("📊 Extracting feature coefficients and importance...")
     
     try:
         # 1. Dig into the pipeline steps
@@ -196,9 +198,9 @@ def extract_feature_importance(model_pipeline):
         # Validate shapes
         if len(final_feature_names) != len(coefficients):
             print(f"⚠️ Warning: Shape mismatch. Names: {len(final_feature_names)}, Coefs: {len(coefficients)}")
-            return pd.DataFrame() # Return empty if mismatch
+            return pd.DataFrame(), pd.DataFrame() # Return empty if mismatch
             
-        # 6. Create DataFrame
+        # 6. Create Coefficients DataFrame
         # Use uppercase column names to match Flask's analyze_wellness_factors()
         # which reads row["Feature"] and row["Coefficient"]
         coef_df = pd.DataFrame({
@@ -208,19 +210,49 @@ def extract_feature_importance(model_pipeline):
         })
         coef_df = coef_df.sort_values("Abs_Coefficient", ascending=False)
         
-        print(f"✅ Extracted {len(coef_df)} selected features (from original {len(all_feature_names)})")
-        return coef_df
+        print(f"✅ Extracted {len(coef_df)} coefficients (from original {len(all_feature_names)})")
+        
+        # 7. Calculate Permutation Importance
+        # Must use the Ridge model alone on already-transformed data
+        # (matching notebook: final_model + x_test_ready)
+        print("🔍 Calculating permutation importance...")
+        x_test_ready = preprocessor_pipe.transform(X_test)
+        
+        result = permutation_importance(
+            regressor, x_test_ready, y_test,
+            n_repeats=10,
+            random_state=42,
+            n_jobs=-1
+        )
+        
+        importances = result.importances_mean
+        
+        # Validate shapes
+        if len(final_feature_names) != len(importances):
+            print(f"⚠️ Warning: Importance mismatch. Names: {len(final_feature_names)}, Scores: {len(importances)}")
+            return coef_df, pd.DataFrame()
+        
+        # 8. Create Importance DataFrame (only Feature + Importance)
+        importance_df = pd.DataFrame({
+            "Feature": final_feature_names,
+            "Importance": importances
+        })
+        importance_df = importance_df.sort_values("Importance", ascending=False)
+        
+        print(f"✅ Extracted {len(importance_df)} importance scores")
+        
+        return coef_df, importance_df
         
     except Exception as e:
         print(f"⚠️ Failed to extract feature importance: {e}")
-        return pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame()
 
 
 # ==========================================
 # 4. ARTIFACT HANDLING & W&B
 # ==========================================
 
-def save_artifacts_locally(model_pipeline, coef_df):
+def save_artifacts_locally(model_pipeline, coef_df, importance_df):
     """Save artifacts locally."""
     print(f"💾 Saving artifacts to {ARTIFACTS_DIR}/...")
     
@@ -235,17 +267,20 @@ def save_artifacts_locally(model_pipeline, coef_df):
     with open(os.path.join(ARTIFACTS_DIR, "preprocessor.pkl"), "wb") as f:
         pickle.dump(model_pipeline.named_steps['preprocessor'], f)
     
-    # Save coefficients as both files:
-    # - model_coefficients.csv: Used by Flask's analyze_wellness_factors()
-    # - feature_importance.csv: Used by W&B and general analysis
+    # Save model coefficients (Feature, Coefficient, Abs_Coefficient)
+    # Used by Flask's analyze_wellness_factors()
     if not coef_df.empty:
         coef_df.to_csv(os.path.join(ARTIFACTS_DIR, "model_coefficients.csv"), index=False)
-        coef_df.to_csv(os.path.join(ARTIFACTS_DIR, "feature_importance.csv"), index=False)
+    
+    # Save feature importance (Feature, Importance)
+    # Used by W&B and general analysis
+    if not importance_df.empty:
+        importance_df.to_csv(os.path.join(ARTIFACTS_DIR, "feature_importance.csv"), index=False)
     
     print("✅ Artifacts saved locally")
 
 
-def upload_to_wandb(metrics, model_config, coef_df):
+def upload_to_wandb(metrics, model_config, coef_df, importance_df):
     """Upload artifacts to Weights & Biases."""
     print("☁️ Uploading artifacts to Weights & Biases...")
     
@@ -260,12 +295,20 @@ def upload_to_wandb(metrics, model_config, coef_df):
     # Log metrics
     wandb.log(metrics)
     
-    # Log Feature Importance Plot
-    if not coef_df.empty:
-        top_features = coef_df.head(20)
+    # Log Feature Importance Plot (using permutation importance)
+    if not importance_df.empty:
+        top_features = importance_df.head(20)
         table = wandb.Table(dataframe=top_features)
         wandb.log({"feature_importance_plot": wandb.plot.bar(
-            table, "feature", "coefficient", title="Top 20 Features (Coefficients)"
+            table, "Feature", "Importance", title="Top 20 Features (Permutation Importance)"
+        )})
+    
+    # Log Coefficients Plot
+    if not coef_df.empty:
+        top_coefs = coef_df.head(20)
+        coef_table = wandb.Table(dataframe=top_coefs)
+        wandb.log({"coefficients_plot": wandb.plot.bar(
+            coef_table, "Feature", "Coefficient", title="Top 20 Features (Coefficients)"
         )})
     
     # Create artifact
@@ -314,11 +357,11 @@ def main():
     # 3. Train Model
     model_pipeline, metrics = train_model(X_train, y_train, X_test, y_test, preprocessor)
     
-    # 4. Extract Importance
-    coef_df = extract_feature_importance(model_pipeline)
+    # 4. Extract Coefficients and Importance
+    coef_df, importance_df = extract_feature_importance(model_pipeline, X_test, y_test)
     
     # 5. Save Locally
-    save_artifacts_locally(model_pipeline, coef_df)
+    save_artifacts_locally(model_pipeline, coef_df, importance_df)
     
     # 6. Upload to W&B
     if os.getenv("SKIP_WANDB") != "true":
@@ -336,7 +379,7 @@ def main():
             "n_features_selected": len(coef_df)
         }
         
-        upload_to_wandb(metrics, model_config, coef_df)
+        upload_to_wandb(metrics, model_config, coef_df, importance_df)
     else:
         print("⏭️ Skipping W&B upload (SKIP_WANDB=true)")
     
