@@ -60,6 +60,7 @@ jobs:
           else
             echo "🚀 Running full training..."
             python train.py
+            python train_cluster.py
           fi
       
       - name: Upload artifacts
