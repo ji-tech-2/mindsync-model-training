@@ -49,6 +49,13 @@ def test_imports():
         return False
 
     try:
+        from imblearn.over_sampling import SMOTE
+        print("✅ imbalanced-learn (SMOTE) imported successfully")
+    except ImportError as e:
+        print(f"❌ imbalanced-learn import failed: {e}")
+        return False
+
+    try:
         import train
         print("✅ Train module imported successfully")
     except ImportError as e:

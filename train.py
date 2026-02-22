@@ -1,6 +1,6 @@
 """
 MindSync Model Training Script with Weights & Biases Integration
-Updated with Smart Preprocessing (Yeo-Johnson + Poly + Lasso)
+Updated with Smart Preprocessing (Yeo-Johnson + Poly + Lasso + SMOTE)
 """
 
 import os
@@ -18,6 +18,7 @@ from sklearn.feature_selection import SelectFromModel
 from sklearn.linear_model import LassoCV
 from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 from sklearn.inspection import permutation_importance
+from imblearn.over_sampling import SMOTE
 
 # Import custom ridge regression
 # Pastikan file custom_ridge.py ada di folder yang sama
@@ -30,7 +31,7 @@ except ImportError:
 # Configuration
 WANDB_PROJECT = os.getenv("WANDB_PROJECT", "mindsync-model")
 WANDB_ENTITY = os.getenv("WANDB_ENTITY", None)
-MODEL_VERSION = os.getenv("MODEL_VERSION", "v2.0-smart-lasso")
+MODEL_VERSION = os.getenv("MODEL_VERSION", "v3.0-smart-lasso-smote")
 ARTIFACTS_DIR = "artifacts"
 
 
@@ -130,23 +131,78 @@ def create_pipeline():
 
 
 # ==========================================
+# 2.5  SMOTE FOR REGRESSION
+# ==========================================
+
+def apply_smote_regression(X, y, n_bins=5, random_state=42):
+    """
+    Apply SMOTE adapted for regression.
+
+    Since SMOTE requires discrete class labels, we:
+      1. Bin the continuous target into *n_bins* quantile groups.
+      2. Stack the original continuous y as an extra feature column
+         so that SMOTE interpolates it alongside the real features.
+      3. After resampling, split the extra column back out to obtain
+         properly interpolated continuous target values.
+
+    Args:
+        X: Preprocessed feature matrix (np.ndarray).
+        y: Continuous target values.
+        n_bins: Number of quantile bins for SMOTE class labels.
+        random_state: Reproducibility seed.
+
+    Returns:
+        (X_resampled, y_resampled) as numpy arrays.
+    """
+    y_arr = y.values if hasattr(y, 'values') else np.array(y, dtype=np.float64)
+
+    # Bin continuous target into discrete categories for SMOTE
+    y_binned = pd.qcut(y_arr, q=n_bins, labels=False, duplicates='drop')
+
+    # Include y as the last column so SMOTE interpolates it with features
+    Xy = np.column_stack([X, y_arr])
+
+    smote = SMOTE(random_state=random_state)
+    Xy_resampled, _ = smote.fit_resample(Xy, y_binned)
+
+    # Split back into features and target
+    X_resampled = Xy_resampled[:, :-1]
+    y_resampled = Xy_resampled[:, -1]
+
+    return X_resampled, y_resampled
+
+
+# ==========================================
 # 3. TRAINING & EVALUATION
 # ==========================================
 
 def train_model(X_train, y_train, X_test, y_test, preprocessor):
-    """Train the Pipeline with Custom Ridge."""
-    print("🎯 Training model (Lasso Selection + Custom Ridge)...")
-    
-    # Full pipeline with model
+    """Train with SMOTE-augmented data + Custom Ridge."""
+    print("🎯 Training model (SMOTE + Lasso Selection + Custom Ridge)...")
+
+    # --- Step 1: Fit preprocessor and transform data ---
+    X_train_prep = preprocessor.fit_transform(X_train, y_train)
+    X_test_prep = preprocessor.transform(X_test)
+
+    # --- Step 2: Apply SMOTE on preprocessed training data ---
+    print("⚖️  Applying SMOTE for regression...")
+    X_train_smote, y_train_smote = apply_smote_regression(
+        X_train_prep, y_train, n_bins=5, random_state=42
+    )
+    print(f"   Before SMOTE: {X_train_prep.shape[0]} samples")
+    print(f"   After  SMOTE: {X_train_smote.shape[0]} samples")
+
+    # --- Step 3: Train Ridge on resampled data ---
+    ridge_model = LinearRegressionRidge(alpha=1.0, solver="closed_form")
+    ridge_model.fit(X_train_smote, y_train_smote)
+
+    # --- Step 4: Assemble inference pipeline (no SMOTE — training-time only) ---
     model_pipeline = Pipeline([
         ("preprocessor", preprocessor),
-        ("model", LinearRegressionRidge(alpha=1.0, solver="closed_form")),
+        ("model", ridge_model),
     ])
-    
-    # Train
-    model_pipeline.fit(X_train, y_train)
-    
-    # Evaluate
+
+    # --- Step 5: Evaluate on original (non-SMOTE) data ---
     y_pred_train = model_pipeline.predict(X_train)
     y_pred_test = model_pipeline.predict(X_test)
     
@@ -289,7 +345,7 @@ def upload_to_wandb(metrics, model_config, coef_df, importance_df):
         entity=WANDB_ENTITY,
         name=f"smart-train-{datetime.now().strftime('%Y%m%d-%H%M')}",
         config=model_config,
-        tags=[MODEL_VERSION, "smart-preprocessing", "lasso-selection", "poly-features"],
+        tags=[MODEL_VERSION, "smart-preprocessing", "lasso-selection", "poly-features", "smote"],
     )
     
     # Log metrics
@@ -373,8 +429,10 @@ def main():
 
         model_config = {
             "model_type": "LinearRegressionRidge",
-            "preprocessing": "Yeo-Johnson + Poly(deg=2) + Lasso",
+            "preprocessing": "Yeo-Johnson + Poly(deg=2) + Lasso + SMOTE",
             "lasso_alpha_selected": lasso_alpha,
+            "smote_enabled": True,
+            "smote_n_bins": 5,
             "n_features_input": X_train.shape[1],
             "n_features_selected": len(coef_df)
         }
