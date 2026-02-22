@@ -32,28 +32,50 @@ WANDB_ENTITY = os.getenv("WANDB_ENTITY", None)
 ARTIFACTS_DIR = "artifacts"
 
 N_CLUSTERS = 5
-CLUSTER_LABELS_ORDERED = ["dangerous", "not healthy", "average", "above average", "healthy"]
+CLUSTER_LABELS_ORDERED = [
+    "dangerous",
+    "not healthy",
+    "average",
+    "above average",
+    "healthy",
+]
 
 NUMERICAL_COLS = [
-    'age', 'work_screen_hours', 'leisure_screen_hours',
-    'sleep_hours', 'sleep_quality_1_5', 'stress_level_0_10',
-    'productivity_0_100', 'exercise_minutes_per_week', 'social_hours_per_week'
+    "age",
+    "work_screen_hours",
+    "leisure_screen_hours",
+    "sleep_hours",
+    "sleep_quality_1_5",
+    "stress_level_0_10",
+    "productivity_0_100",
+    "exercise_minutes_per_week",
+    "social_hours_per_week",
 ]
-CATEGORICAL_COLS = ['gender', 'occupation', 'work_mode']
-TARGET_COL = 'mental_wellness_index_0_100'
+CATEGORICAL_COLS = ["gender", "occupation", "work_mode"]
+TARGET_COL = "mental_wellness_index_0_100"
 
 # Column order for output CSVs
 OUTPUT_COLS = [
-    'age', 'gender', 'occupation', 'work_mode',
-    'work_screen_hours', 'leisure_screen_hours', 'sleep_hours',
-    'sleep_quality_1_5', 'stress_level_0_10', 'productivity_0_100',
-    'exercise_minutes_per_week', 'social_hours_per_week', 'mental_wellness_index_0_100'
+    "age",
+    "gender",
+    "occupation",
+    "work_mode",
+    "work_screen_hours",
+    "leisure_screen_hours",
+    "sleep_hours",
+    "sleep_quality_1_5",
+    "stress_level_0_10",
+    "productivity_0_100",
+    "exercise_minutes_per_week",
+    "social_hours_per_week",
+    "mental_wellness_index_0_100",
 ]
 
 
 # ==========================================
 # 1. DATA PREPARATION & CLEANING
 # ==========================================
+
 
 def clean_occupation_column(df):
     """Clean occupation column by combining rare categories."""
@@ -82,8 +104,8 @@ def load_and_prepare_data():
     df = pd.read_csv(df_path)
     print(f"✅ Loaded {len(df)} samples from {df_path}")
 
-    if 'user_id' in df.columns:
-        df = df.drop('user_id', axis=1)
+    if "user_id" in df.columns:
+        df = df.drop("user_id", axis=1)
 
     df = clean_occupation_column(df)
     return df
@@ -92,6 +114,7 @@ def load_and_prepare_data():
 # ==========================================
 # 2. CLUSTER PREPROCESSING
 # ==========================================
+
 
 def create_cluster_preprocessor():
     """
@@ -102,15 +125,15 @@ def create_cluster_preprocessor():
 
     numerical_transformer = StandardScaler()
     categorical_transformer = OneHotEncoder(
-        drop='first', handle_unknown='ignore', sparse_output=False
+        drop="first", handle_unknown="ignore", sparse_output=False
     )
 
     preprocessor = ColumnTransformer(
         transformers=[
-            ('num', numerical_transformer, NUMERICAL_COLS),
-            ('cat', categorical_transformer, CATEGORICAL_COLS)
+            ("num", numerical_transformer, NUMERICAL_COLS),
+            ("cat", categorical_transformer, CATEGORICAL_COLS),
         ],
-        remainder='drop'
+        remainder="drop",
     )
     return preprocessor
 
@@ -118,6 +141,7 @@ def create_cluster_preprocessor():
 # ==========================================
 # 3. CLUSTERING & LABEL ASSIGNMENT
 # ==========================================
+
 
 def assign_cluster_labels(cluster_wellness_means):
     """
@@ -154,15 +178,15 @@ def train_clustering(df):
 
     kmeans = KMeans(n_clusters=N_CLUSTERS, random_state=42, n_init=10)
     df = df.copy()
-    df['cluster_id'] = kmeans.fit_predict(X_scaled)
+    df["cluster_id"] = kmeans.fit_predict(X_scaled)
 
-    cluster_wellness_means = df.groupby('cluster_id')[TARGET_COL].mean()
+    cluster_wellness_means = df.groupby("cluster_id")[TARGET_COL].mean()
     cluster_to_label = assign_cluster_labels(cluster_wellness_means)
-    df['cluster_label'] = df['cluster_id'].map(cluster_to_label)
+    df["cluster_label"] = df["cluster_id"].map(cluster_to_label)
 
     print("\n📊 Cluster Summary:")
     for label in CLUSTER_LABELS_ORDERED:
-        subset = df[df['cluster_label'] == label]
+        subset = df[df["cluster_label"] == label]
         print(
             f"   {label:<15} : {len(subset):>4} samples "
             f"| mean wellness: {subset[TARGET_COL].mean():.2f}"
@@ -175,6 +199,7 @@ def train_clustering(df):
 # 4. CLUSTER AVERAGES
 # ==========================================
 
+
 def compute_cluster_averages(df):
     """
     Compute per-cluster profile:
@@ -186,8 +211,8 @@ def compute_cluster_averages(df):
     rows = []
 
     for label in CLUSTER_LABELS_ORDERED:
-        subset = df[df['cluster_label'] == label]
-        row = {'cluster_label': label}
+        subset = df[df["cluster_label"] == label]
+        row = {"cluster_label": label}
 
         for col in NUMERICAL_COLS:
             row[col] = round(float(subset[col].mean()), 2)
@@ -195,7 +220,7 @@ def compute_cluster_averages(df):
         for col in CATEGORICAL_COLS:
             row[col] = subset[col].mode().iloc[0]
 
-        row['mental_wellness_index_0_100'] = round(float(subset[TARGET_COL].mean()), 2)
+        row["mental_wellness_index_0_100"] = round(float(subset[TARGET_COL].mean()), 2)
 
         rows.append(row)
         print(f"   ✅ {label}")
@@ -206,6 +231,7 @@ def compute_cluster_averages(df):
 # ==========================================
 # 5. SAVE CSV ARTIFACTS & W&B
 # ==========================================
+
 
 def label_to_filename(label):
     """Convert cluster label to a safe filename, e.g. 'not healthy' → 'not_healthy_cluster_avg.csv'."""
@@ -219,7 +245,7 @@ def save_artifacts_locally(cluster_avgs_df):
 
     # Save per-cluster CSVs
     for _, row in cluster_avgs_df.iterrows():
-        label = row['cluster_label']
+        label = row["cluster_label"]
         filename = label_to_filename(label)
         single_row = pd.DataFrame([row[OUTPUT_COLS]])
         single_row.to_csv(os.path.join(ARTIFACTS_DIR, filename), index=False)
@@ -236,8 +262,8 @@ def upload_to_wandb(df, cluster_avgs_df):
     """Upload clustering artifacts to Weights & Biases."""
     print("\n☁️ Uploading artifacts to Weights & Biases...")
 
-    cluster_sizes = df['cluster_label'].value_counts().to_dict()
-    cluster_wellness = df.groupby('cluster_label')[TARGET_COL].mean().to_dict()
+    cluster_sizes = df["cluster_label"].value_counts().to_dict()
+    cluster_wellness = df.groupby("cluster_label")[TARGET_COL].mean().to_dict()
 
     run = wandb.init(
         project=WANDB_PROJECT,
@@ -254,10 +280,18 @@ def upload_to_wandb(df, cluster_avgs_df):
         tags=["clustering", "kmeans", f"k={N_CLUSTERS}"],
     )
 
-    wandb.log({
-        **{f"wellness/{label}": cluster_wellness.get(label, 0) for label in CLUSTER_LABELS_ORDERED},
-        **{f"size/{label}": cluster_sizes.get(label, 0) for label in CLUSTER_LABELS_ORDERED},
-    })
+    wandb.log(
+        {
+            **{
+                f"wellness/{label}": cluster_wellness.get(label, 0)
+                for label in CLUSTER_LABELS_ORDERED
+            },
+            **{
+                f"size/{label}": cluster_sizes.get(label, 0)
+                for label in CLUSTER_LABELS_ORDERED
+            },
+        }
+    )
 
     table = wandb.Table(dataframe=cluster_avgs_df)
     wandb.log({"cluster_averages_table": table})
@@ -287,6 +321,7 @@ def upload_to_wandb(df, cluster_avgs_df):
 # ==========================================
 # 6. MAIN EXECUTION
 # ==========================================
+
 
 def main():
     print("=" * 60)

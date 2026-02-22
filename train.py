@@ -11,7 +11,13 @@ import numpy as np
 import wandb
 from datetime import datetime
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler, OneHotEncoder, PolynomialFeatures, PowerTransformer, FunctionTransformer
+from sklearn.preprocessing import (
+    StandardScaler,
+    OneHotEncoder,
+    PolynomialFeatures,
+    PowerTransformer,
+    FunctionTransformer,
+)
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.feature_selection import SelectFromModel
@@ -39,6 +45,7 @@ ARTIFACTS_DIR = "artifacts"
 # 1. DATA PREPARATION & CLEANING
 # ==========================================
 
+
 def clean_occupation_column(df):
     """Clean occupation column by combining rare categories."""
     df_copy = df.copy()
@@ -52,24 +59,24 @@ def clean_occupation_column(df):
 def load_and_prepare_data():
     """Load and prepare dataset for training."""
     print("📂 Loading dataset...")
-    
+
     try:
         base_dir = os.path.dirname(os.path.abspath(__file__))
     except NameError:
         base_dir = os.getcwd()
-    
+
     df_path = os.path.join(base_dir, "df", "ScreenTime vs MentalWellness.csv")
-    
+
     if not os.path.exists(df_path):
         raise FileNotFoundError(f"Dataset not found at {df_path}")
 
     df = pd.read_csv(df_path)
     print(f"✅ Loaded {len(df)} samples from {df_path}")
-    
+
     # Drop user_id if exists
-    if 'user_id' in df.columns:
-        df = df.drop('user_id', axis=1)
-    
+    if "user_id" in df.columns:
+        df = df.drop("user_id", axis=1)
+
     return df
 
 
@@ -77,42 +84,56 @@ def load_and_prepare_data():
 # 2. SMART PIPELINE CONSTRUCTION
 # ==========================================
 
+
 def create_pipeline():
     """
     Create the Smart Preprocessing Pipeline:
     Cleaner -> Yeo-Johnson -> Poly -> OHE -> Global Scaling -> Lasso Selection
     """
     print("🔧 Creating smart preprocessing pipeline...")
-    
+
     # Define Columns
     numerical_cols = [
-        'age', 'work_screen_hours', 'leisure_screen_hours',
-        'sleep_hours', 'sleep_quality_1_5', 'stress_level_0_10',
-        'productivity_0_100', 'exercise_minutes_per_week', 'social_hours_per_week'
+        "age",
+        "work_screen_hours",
+        "leisure_screen_hours",
+        "sleep_hours",
+        "sleep_quality_1_5",
+        "stress_level_0_10",
+        "productivity_0_100",
+        "exercise_minutes_per_week",
+        "social_hours_per_week",
     ]
-    categorical_cols = ['gender', 'occupation', 'work_mode']
+    categorical_cols = ["gender", "occupation", "work_mode"]
 
     # 1. Custom Cleaner
     binning_transformer = FunctionTransformer(clean_occupation_column, validate=False)
 
     # 2. Numerical Transformer (Yeo-Johnson -> Poly)
-    numerical_transformer = Pipeline([
-        ('transform_skew', PowerTransformer(method='yeo-johnson')),
-        ('poly', PolynomialFeatures(degree=2, interaction_only=False, include_bias=False))
-    ])
+    numerical_transformer = Pipeline(
+        [
+            ("transform_skew", PowerTransformer(method="yeo-johnson")),
+            (
+                "poly",
+                PolynomialFeatures(
+                    degree=2, interaction_only=False, include_bias=False
+                ),
+            ),
+        ]
+    )
 
     # 3. Categorical Transformer
     categorical_transformer = OneHotEncoder(
-        drop='first', handle_unknown='ignore', sparse_output=False
+        drop="first", handle_unknown="ignore", sparse_output=False
     )
 
     # 4. Column Transformer
     preprocessor_raw = ColumnTransformer(
         transformers=[
-            ('num', numerical_transformer, numerical_cols),
-            ('cat', categorical_transformer, categorical_cols)
+            ("num", numerical_transformer, numerical_cols),
+            ("cat", categorical_transformer, categorical_cols),
         ],
-        remainder='drop'
+        remainder="drop",
     )
 
     # 5. Lasso Engine for Feature Selection
@@ -120,19 +141,22 @@ def create_pipeline():
 
     # 6. Full Pipeline Assembly
     # Note: We do NOT include the final model here yet, this is just the preprocessor
-    smart_preprocessor = Pipeline([
-        ('cleaner', binning_transformer),
-        ('prepare_data', preprocessor_raw), 
-        ('global_scaler', StandardScaler()),
-        ('feature_selection', SelectFromModel(lasso_engine)) 
-    ])
-    
+    smart_preprocessor = Pipeline(
+        [
+            ("cleaner", binning_transformer),
+            ("prepare_data", preprocessor_raw),
+            ("global_scaler", StandardScaler()),
+            ("feature_selection", SelectFromModel(lasso_engine)),
+        ]
+    )
+
     return smart_preprocessor
 
 
 # ==========================================
 # 2.5  SMOTE FOR REGRESSION
 # ==========================================
+
 
 def apply_smote_regression(X, y, n_bins=5, random_state=42):
     """
@@ -154,10 +178,10 @@ def apply_smote_regression(X, y, n_bins=5, random_state=42):
     Returns:
         (X_resampled, y_resampled) as numpy arrays.
     """
-    y_arr = y.values if hasattr(y, 'values') else np.array(y, dtype=np.float64)
+    y_arr = y.values if hasattr(y, "values") else np.array(y, dtype=np.float64)
 
     # Bin continuous target into discrete categories for SMOTE
-    y_binned = pd.qcut(y_arr, q=n_bins, labels=False, duplicates='drop')
+    y_binned = pd.qcut(y_arr, q=n_bins, labels=False, duplicates="drop")
 
     # Include y as the last column so SMOTE interpolates it with features
     Xy = np.column_stack([X, y_arr])
@@ -175,6 +199,7 @@ def apply_smote_regression(X, y, n_bins=5, random_state=42):
 # ==========================================
 # 3. TRAINING & EVALUATION
 # ==========================================
+
 
 def train_model(X_train, y_train, X_test, y_test, preprocessor):
     """Train with SMOTE-augmented data + Custom Ridge."""
@@ -197,15 +222,17 @@ def train_model(X_train, y_train, X_test, y_test, preprocessor):
     ridge_model.fit(X_train_smote, y_train_smote)
 
     # --- Step 4: Assemble inference pipeline (no SMOTE — training-time only) ---
-    model_pipeline = Pipeline([
-        ("preprocessor", preprocessor),
-        ("model", ridge_model),
-    ])
+    model_pipeline = Pipeline(
+        [
+            ("preprocessor", preprocessor),
+            ("model", ridge_model),
+        ]
+    )
 
     # --- Step 5: Evaluate on original (non-SMOTE) data ---
     y_pred_train = model_pipeline.predict(X_train)
     y_pred_test = model_pipeline.predict(X_test)
-    
+
     metrics = {
         "train_r2": r2_score(y_train, y_pred_train),
         "train_rmse": np.sqrt(mean_squared_error(y_train, y_pred_train)),
@@ -214,11 +241,11 @@ def train_model(X_train, y_train, X_test, y_test, preprocessor):
         "test_rmse": np.sqrt(mean_squared_error(y_test, y_pred_test)),
         "test_mae": mean_absolute_error(y_test, y_pred_test),
     }
-    
+
     print(f"✅ Training R²: {metrics['train_r2']:.4f}")
     print(f"✅ Test R²: {metrics['test_r2']:.4f}")
     print(f"✅ Test RMSE: {metrics['test_rmse']:.4f}")
-    
+
     return model_pipeline, metrics
 
 
@@ -228,77 +255,83 @@ def extract_feature_importance(model_pipeline, X_test, y_test):
     Returns: (coef_df, importance_df)
     """
     print("📊 Extracting feature coefficients and importance...")
-    
+
     try:
         # 1. Dig into the pipeline steps
-        preprocessor_pipe = model_pipeline.named_steps['preprocessor']
+        preprocessor_pipe = model_pipeline.named_steps["preprocessor"]
         # Support both step names: 'model' (notebook convention) and 'regressor' (legacy)
-        regressor = model_pipeline.named_steps.get('model') or model_pipeline.named_steps.get('regressor')
-        
+        regressor = model_pipeline.named_steps.get(
+            "model"
+        ) or model_pipeline.named_steps.get("regressor")
+
         # Steps inside preprocessor
-        prepare_step = preprocessor_pipe.named_steps['prepare_data']
-        selector_step = preprocessor_pipe.named_steps['feature_selection']
-        
+        prepare_step = preprocessor_pipe.named_steps["prepare_data"]
+        selector_step = preprocessor_pipe.named_steps["feature_selection"]
+
         # 2. Get ALL feature names (after Poly + OHE)
         all_feature_names = prepare_step.get_feature_names_out()
-        
+
         # 3. Get Mask from Lasso Selection
         selected_mask = selector_step.get_support()
-        
+
         # 4. Filter names
         final_feature_names = all_feature_names[selected_mask]
-        
+
         # 5. Get Coefficients from Ridge (try 'model' step first, fallback to 'regressor')
         coefficients = regressor.coef_
-        
+
         # Validate shapes
         if len(final_feature_names) != len(coefficients):
-            print(f"⚠️ Warning: Shape mismatch. Names: {len(final_feature_names)}, Coefs: {len(coefficients)}")
-            return pd.DataFrame(), pd.DataFrame() # Return empty if mismatch
-            
+            print(
+                f"⚠️ Warning: Shape mismatch. Names: {len(final_feature_names)}, Coefs: {len(coefficients)}"
+            )
+            return pd.DataFrame(), pd.DataFrame()  # Return empty if mismatch
+
         # 6. Create Coefficients DataFrame
         # Use uppercase column names to match Flask's analyze_wellness_factors()
         # which reads row["Feature"] and row["Coefficient"]
-        coef_df = pd.DataFrame({
-            "Feature": final_feature_names, 
-            "Coefficient": coefficients, 
-            "Abs_Coefficient": np.abs(coefficients)
-        })
+        coef_df = pd.DataFrame(
+            {
+                "Feature": final_feature_names,
+                "Coefficient": coefficients,
+                "Abs_Coefficient": np.abs(coefficients),
+            }
+        )
         coef_df = coef_df.sort_values("Abs_Coefficient", ascending=False)
-        
-        print(f"✅ Extracted {len(coef_df)} coefficients (from original {len(all_feature_names)})")
-        
+
+        print(
+            f"✅ Extracted {len(coef_df)} coefficients (from original {len(all_feature_names)})"
+        )
+
         # 7. Calculate Permutation Importance
         # Must use the Ridge model alone on already-transformed data
         # (matching notebook: final_model + x_test_ready)
         print("🔍 Calculating permutation importance...")
         x_test_ready = preprocessor_pipe.transform(X_test)
-        
+
         result = permutation_importance(
-            regressor, x_test_ready, y_test,
-            n_repeats=10,
-            random_state=42,
-            n_jobs=-1
+            regressor, x_test_ready, y_test, n_repeats=10, random_state=42, n_jobs=-1
         )
-        
+
         importances = result.importances_mean
-        
+
         # Validate shapes
         if len(final_feature_names) != len(importances):
-            print(f"⚠️ Warning: Importance mismatch. Names: {len(final_feature_names)}, Scores: {len(importances)}")
+            print(
+                f"⚠️ Warning: Importance mismatch. Names: {len(final_feature_names)}, Scores: {len(importances)}"
+            )
             return coef_df, pd.DataFrame()
-        
+
         # 8. Create Importance DataFrame (only Feature + Importance)
-        importance_df = pd.DataFrame({
-            "Feature": final_feature_names,
-            "Importance": importances
-        })
+        importance_df = pd.DataFrame(
+            {"Feature": final_feature_names, "Importance": importances}
+        )
         importance_df = importance_df.sort_values("Importance", ascending=False)
-        
+
         print(f"✅ Extracted {len(importance_df)} importance scores")
-        
+
         return coef_df, importance_df
-        
+
     except Exception as e:
         print(f"⚠️ Failed to extract feature importance: {e}")
         return pd.DataFrame(), pd.DataFrame()
@@ -308,65 +341,90 @@ def extract_feature_importance(model_pipeline, X_test, y_test):
 # 4. ARTIFACT HANDLING & W&B
 # ==========================================
 
+
 def save_artifacts_locally(model_pipeline, coef_df, importance_df):
     """Save artifacts locally."""
     print(f"💾 Saving artifacts to {ARTIFACTS_DIR}/...")
-    
+
     os.makedirs(ARTIFACTS_DIR, exist_ok=True)
-    
+
     # Save Full Pipeline (Model + Preprocessor)
     # This is the only file needed for inference
     with open(os.path.join(ARTIFACTS_DIR, "model.pkl"), "wb") as f:
         pickle.dump(model_pipeline, f)
-    
+
     # Also save just the preprocessor (optional, useful for debugging)
     with open(os.path.join(ARTIFACTS_DIR, "preprocessor.pkl"), "wb") as f:
-        pickle.dump(model_pipeline.named_steps['preprocessor'], f)
-    
+        pickle.dump(model_pipeline.named_steps["preprocessor"], f)
+
     # Save model coefficients (Feature, Coefficient, Abs_Coefficient)
     # Used by Flask's analyze_wellness_factors()
     if not coef_df.empty:
-        coef_df.to_csv(os.path.join(ARTIFACTS_DIR, "model_coefficients.csv"), index=False)
-    
+        coef_df.to_csv(
+            os.path.join(ARTIFACTS_DIR, "model_coefficients.csv"), index=False
+        )
+
     # Save feature importance (Feature, Importance)
     # Used by W&B and general analysis
     if not importance_df.empty:
-        importance_df.to_csv(os.path.join(ARTIFACTS_DIR, "feature_importance.csv"), index=False)
-    
+        importance_df.to_csv(
+            os.path.join(ARTIFACTS_DIR, "feature_importance.csv"), index=False
+        )
+
     print("✅ Artifacts saved locally")
 
 
 def upload_to_wandb(metrics, model_config, coef_df, importance_df):
     """Upload artifacts to Weights & Biases."""
     print("☁️ Uploading artifacts to Weights & Biases...")
-    
+
     run = wandb.init(
         project=WANDB_PROJECT,
         entity=WANDB_ENTITY,
         name=f"smart-train-{datetime.now().strftime('%Y%m%d-%H%M')}",
         config=model_config,
-        tags=[MODEL_VERSION, "smart-preprocessing", "lasso-selection", "poly-features", "smote"],
+        tags=[
+            MODEL_VERSION,
+            "smart-preprocessing",
+            "lasso-selection",
+            "poly-features",
+            "smote",
+        ],
     )
-    
+
     # Log metrics
     wandb.log(metrics)
-    
+
     # Log Feature Importance Plot (using permutation importance)
     if not importance_df.empty:
         top_features = importance_df.head(20)
         table = wandb.Table(dataframe=top_features)
-        wandb.log({"feature_importance_plot": wandb.plot.bar(
-            table, "Feature", "Importance", title="Top 20 Features (Permutation Importance)"
-        )})
-    
+        wandb.log(
+            {
+                "feature_importance_plot": wandb.plot.bar(
+                    table,
+                    "Feature",
+                    "Importance",
+                    title="Top 20 Features (Permutation Importance)",
+                )
+            }
+        )
+
     # Log Coefficients Plot
     if not coef_df.empty:
         top_coefs = coef_df.head(20)
         coef_table = wandb.Table(dataframe=top_coefs)
-        wandb.log({"coefficients_plot": wandb.plot.bar(
-            coef_table, "Feature", "Coefficient", title="Top 20 Features (Coefficients)"
-        )})
-    
+        wandb.log(
+            {
+                "coefficients_plot": wandb.plot.bar(
+                    coef_table,
+                    "Feature",
+                    "Coefficient",
+                    title="Top 20 Features (Coefficients)",
+                )
+            }
+        )
+
     # Create artifact
     artifact = wandb.Artifact(
         name="mindsync-model-smart",
@@ -374,14 +432,19 @@ def upload_to_wandb(metrics, model_config, coef_df, importance_df):
         description="MindSync Model with Poly+Lasso Preprocessing",
         metadata=metrics,
     )
-    
+
     # Add files
-    files = ["model.pkl", "preprocessor.pkl", "feature_importance.csv", "model_coefficients.csv"]
+    files = [
+        "model.pkl",
+        "preprocessor.pkl",
+        "feature_importance.csv",
+        "model_coefficients.csv",
+    ]
     for filename in files:
         filepath = os.path.join(ARTIFACTS_DIR, filename)
         if os.path.exists(filepath):
             artifact.add_file(filepath)
-    
+
     run.log_artifact(artifact)
     print(f"✅ Artifacts uploaded to W&B. Run URL: {run.get_url()}")
     wandb.finish()
@@ -391,39 +454,46 @@ def upload_to_wandb(metrics, model_config, coef_df, importance_df):
 # 5. MAIN EXECUTION
 # ==========================================
 
+
 def main():
     print("=" * 60)
     print("🚀 MindSync Training Pipeline (Smart V2)")
     print("=" * 60)
-    
+
     # 1. Load Data
     df = load_and_prepare_data()
     target = "mental_wellness_index_0_100"
-    
+
     X = df.drop(target, axis=1)
     y = df[target]
-    
+
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42
     )
-    
+
     # 2. Create Smart Preprocessor
     preprocessor = create_pipeline()
-    
+
     # 3. Train Model
-    model_pipeline, metrics = train_model(X_train, y_train, X_test, y_test, preprocessor)
-    
+    model_pipeline, metrics = train_model(
+        X_train, y_train, X_test, y_test, preprocessor
+    )
+
     # 4. Extract Coefficients and Importance
     coef_df, importance_df = extract_feature_importance(model_pipeline, X_test, y_test)
-    
+
     # 5. Save Locally
     save_artifacts_locally(model_pipeline, coef_df, importance_df)
-    
+
     # 6. Upload to W&B
     if os.getenv("SKIP_WANDB") != "true":
         # Get Lasso Alpha if available for config logging
         try:
-            lasso_alpha = model_pipeline.named_steps['preprocessor'].named_steps['feature_selection'].estimator_.alpha_
+            lasso_alpha = (
+                model_pipeline.named_steps["preprocessor"]
+                .named_steps["feature_selection"]
+                .estimator_.alpha_
+            )
         except:
             lasso_alpha = "unknown"
 
@@ -434,13 +504,13 @@ def main():
             "smote_enabled": True,
             "smote_n_bins": 5,
             "n_features_input": X_train.shape[1],
-            "n_features_selected": len(coef_df)
+            "n_features_selected": len(coef_df),
         }
-        
+
         upload_to_wandb(metrics, model_config, coef_df, importance_df)
     else:
         print("⏭️ Skipping W&B upload (SKIP_WANDB=true)")
-    
+
     print("\n" + "=" * 60)
     print("✅ Pipeline completed successfully!")
     print("=" * 60)
